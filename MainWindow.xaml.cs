@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Windows;
 using System.IO;
-using System.Web.Script.Serialization;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Net;
@@ -179,9 +178,7 @@ namespace DNotesInvoicePOC
             {
                 case SubscriptionType.day:
                     priceUSD = 0.99;
-                    //TODO: return to normal
-                    //expiration = now + 86400 + (reqConfirmations * 60);
-                    expiration = now + 60 * 5;
+                    expiration = now + 86400 + (reqConfirmations * 60);
                     break;
                 case SubscriptionType.week:
                     priceUSD = 4.99;
@@ -353,7 +350,6 @@ namespace DNotesInvoicePOC
             }
 
             File.Copy(StateFile, subFileCopy);
-            //File.Decrypt(subFileCopy);
             DecryptFile(subFileCopy);
             dynamic json = JsonConvert.DeserializeObject(File.ReadAllText(subFileCopy));
             File.Delete(subFileCopy);
