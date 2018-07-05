@@ -28,8 +28,11 @@ namespace DNotesInvoicePOC
     public partial class MainWindow : Window
     {
         private const long DNotesToSatoshi = 100000000;
-        private const string salt = "hcH3Cm3gPn3O2zQLqzjrnQ==";
-        private const string key = "SdrkxNdzwj7TMqwY";
+        private const string Salt = "hcH3Cm3gPn3O2zQLqzjrnQ==";
+        private const string Key = "SdrkxNdzwj7TMqwY";
+        private const bool Testnet = true;
+        private const string Address = "TXFjPSgevKLk1n7Z9TB2uRxDZTDaBjveC1";
+        private const int ReqConfirmations = 6;
 
         private string StateFile = Directory.GetCurrentDirectory() + "\\subscription.json";
 
@@ -100,10 +103,10 @@ namespace DNotesInvoicePOC
             
             var qrcode = new QRCodeWriter();
             var price = (double)state.price / DNotesToSatoshi;
-            var qrValue = string.Format("dnotes:{0}?amount={1}&invoice={2}", ConfigurationManager.AppSettings["address"], price, state.invoice);
+            var qrValue = string.Format("dnotes:{0}?amount={1}&invoice={2}", Address, price, state.invoice);
 
             var payText = string.Format("Please <a href='{0}'>pay</a> {1} NOTE to {2} for invoice {3}.\nWhen payment is verified, software will become active.",
-                qrValue, price, ConfigurationManager.AppSettings["address"], state.invoice);
+                qrValue, price, Address, state.invoice);
 
             var xaml = HtmlToXamlConverter.ConvertHtmlToXaml(payText, true);
             var flowDocument = XamlReader.Parse(xaml);
@@ -171,7 +174,7 @@ namespace DNotesInvoicePOC
 
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             var expiration = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
-            var reqConfirmations = int.Parse(ConfigurationManager.AppSettings["reqConfirmations"]);
+            var reqConfirmations = ReqConfirmations;
 
             double priceUSD = 0;
             switch (t)
@@ -215,7 +218,7 @@ namespace DNotesInvoicePOC
             var invoice = json.invoice;
             var price = long.Parse((string) json.price);
 
-            if (!CheckPayment((string) invoice, price, ConfigurationManager.AppSettings["address"], int.Parse(ConfigurationManager.AppSettings["reqConfirmations"])))
+            if (!CheckPayment((string) invoice, price, Address, ReqConfirmations))
             {
                 return false;
             }
@@ -249,7 +252,7 @@ namespace DNotesInvoicePOC
 
             string url = "";
 
-            if (bool.Parse(ConfigurationManager.AppSettings["testnet"]))
+            if (Testnet)
             {
                 url = @"http://dnotesdevlinux4.southcentralus.cloudapp.azure.com/chain/DNotesTestnet/q/invoice/" + address + '+' + invoice;
             }
@@ -375,8 +378,8 @@ namespace DNotesInvoicePOC
         {
             var content = File.ReadAllText(path);
 
-            var ivBytes = Convert.FromBase64String(salt);
-            var keyBytes = new ASCIIEncoding().GetBytes(key);
+            var ivBytes = Convert.FromBase64String(Salt);
+            var keyBytes = new ASCIIEncoding().GetBytes(Key);
 
             byte[] toEncrypt = new ASCIIEncoding().GetBytes(Convert.ToBase64String(new ASCIIEncoding().GetBytes(content)));
 
@@ -399,8 +402,8 @@ namespace DNotesInvoicePOC
         {
             var content = File.ReadAllText(path);
 
-            var ivBytes = Convert.FromBase64String(salt);
-            var keyBytes = new ASCIIEncoding().GetBytes(key);
+            var ivBytes = Convert.FromBase64String(Salt);
+            var keyBytes = new ASCIIEncoding().GetBytes(Key);
 
             var toDecryptArray = Convert.FromBase64String(content);
 
