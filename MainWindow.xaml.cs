@@ -2,11 +2,9 @@
 using System.Windows;
 using System.IO;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Net;
 using System.Security.Cryptography;
 using Newtonsoft.Json;
-using System.Threading;
 using ZXing.QrCode;
 using ZXing;
 using ZXing.Common;
@@ -19,6 +17,7 @@ using System.Windows.Markup;
 using System.Windows.Documents;
 using System.Linq;
 using System.Text;
+using System.Windows.Threading;
 
 namespace DNotesInvoicePOC
 {
@@ -27,26 +26,48 @@ namespace DNotesInvoicePOC
     /// </summary>
     public partial class MainWindow : Window
     {
+        private DispatcherTimer _timer;
+
         private const long DNotesToSatoshi = 100000000;
+
+        /*TODO: generate your own random salt and key for encryption
+         * The key is 16 random letters and numbers (case sensitive), the salt is a base64 encoding of
+         a random array of 16 bytes generated with the following code:
+            var rngCsp = new RNGCryptoServiceProvider();
+            byte[] ivBytes = new byte[16];
+            rngCsp.GetBytes(ivBytes);
+        */
         private const string Salt = "hcH3Cm3gPn3O2zQLqzjrnQ==";
         private const string Key = "SdrkxNdzwj7TMqwY";
+
+        /*TODO: testing parameters */
         private const bool Testnet = true;
-        private const string Address = "TXFjPSgevKLk1n7Z9TB2uRxDZTDaBjveC1";
-        private const int ReqConfirmations = 6;
+        private const string TestnetAddress = "TXFjPSgevKLk1n7Z9TB2uRxDZTDaBjveC1";
+        
+        /*TODO: number of confirmations you would like to see in the blockchain 
+         * before payment is considered confirmed.*/
+        private const int ReqConfirmations = 0;
+
+        private const string CopyAmtUrl = "copyamt";
+        private const string CopyAddrUrl = "copyaddr";
 
         private string StateFile = Directory.GetCurrentDirectory() + "\\subscription.json";
 
         private enum SubscriptionType
         {
-            day = 0,
-            week = 1,
-            unlimited = 2
+            Day = 0,
+            Week = 1,
+            Month = 2,
+            Year = 3
         }
         
         public MainWindow()
         {
             InitializeComponent();
             var state = ParseState();
+
+            this._timer = new DispatcherTimer();
+            this._timer.Interval = new TimeSpan(0, 0, 10);
 
             if (CheckSubscription())
             {
@@ -55,20 +76,44 @@ namespace DNotesInvoicePOC
             //subscription is not verified, but waiting for payment
             else if (state != null)
             {
-                ShowPaymentScreen();
+                ShowPaymentScreen();                
                 LoopCheck();
             }
+            else
+            {
+                InitialScreen();
+            }
+
         }
 
+        private void Timer_Tick(object sender, EventArgs e)
+        {
+            if (CheckSubscription())
+            {
+                EnableSoftware();
+            }
+            else if (SoftwareEnabled())
+            {
+                File.Delete(StateFile);
+                InitialScreen();
+            }
+        }
+        
         private void EnableSoftware()
         {
             opt1.Visibility = Visibility.Hidden;
             opt2.Visibility = Visibility.Hidden;
             opt3.Visibility = Visibility.Hidden;
+            opt4.Visibility = Visibility.Hidden;
             subLabel.Visibility = Visibility.Hidden;
             paidLabel.Visibility = Visibility.Visible;
-            verifyLabel.Visibility = Visibility.Hidden;
+            payLabel.Visibility = Visibility.Hidden;
             qrCodeImage.Visibility = Visibility.Hidden;
+            progressImage.Visibility = Visibility.Hidden;
+            progressLabel.Visibility = Visibility.Hidden;
+            payElectrumButton.Visibility = Visibility.Hidden;
+            usdLabel.Visibility = Visibility.Hidden;
+            payDNotesLabel.Visibility = Visibility.Hidden;
         }
 
         private bool SoftwareEnabled()
@@ -81,10 +126,16 @@ namespace DNotesInvoicePOC
             opt1.Visibility = Visibility.Hidden;
             opt2.Visibility = Visibility.Hidden;
             opt3.Visibility = Visibility.Hidden;
+            opt4.Visibility = Visibility.Hidden;
             subLabel.Visibility = Visibility.Hidden;
             paidLabel.Visibility = Visibility.Hidden;
-            verifyLabel.Visibility = Visibility.Visible;
+            payLabel.Visibility = Visibility.Visible;
             qrCodeImage.Visibility = Visibility.Visible;
+            progressImage.Visibility = Visibility.Visible;
+            progressLabel.Visibility = Visibility.Visible;
+            payElectrumButton.Visibility = Visibility.Visible;
+            usdLabel.Visibility = Visibility.Visible;
+            payDNotesLabel.Visibility = Visibility.Visible;
             GenerateQRCodeAndLink(ParseState());
         }
         private void InitialScreen()
@@ -92,26 +143,38 @@ namespace DNotesInvoicePOC
             opt1.Visibility = Visibility.Visible;
             opt2.Visibility = Visibility.Visible;
             opt3.Visibility = Visibility.Visible;
+            opt4.Visibility = Visibility.Visible;
             subLabel.Visibility = Visibility.Visible;
             paidLabel.Visibility = Visibility.Hidden;
-            verifyLabel.Visibility = Visibility.Hidden;
+            payLabel.Visibility = Visibility.Hidden;
             qrCodeImage.Visibility = Visibility.Hidden;
+            progressImage.Visibility = Visibility.Hidden;
+            progressLabel.Visibility = Visibility.Hidden;
+            payElectrumButton.Visibility = Visibility.Hidden;
+            usdLabel.Visibility = Visibility.Hidden;
+            payDNotesLabel.Visibility = Visibility.Hidden;
         }
 
         private void GenerateQRCodeAndLink(dynamic state)
         {
             
             var qrcode = new QRCodeWriter();
-            var price = (double)state.price / DNotesToSatoshi;
-            var qrValue = string.Format("dnotes:{0}?amount={1}&invoice={2}", Address, price, state.invoice);
+            var price = (decimal)state.price / DNotesToSatoshi;
+            var address = (string)state.address;
+            var qrValue = string.Format("dnotes:{0}?amount={1}&invoice={2}", address, price, state.invoice);
+            var priceUSD = (decimal)state.priceUSD;
+            var invoice = (string)state.invoice;
 
-            var payText = string.Format("Please <a href='{0}'>pay</a> {1} NOTE to {2} for invoice {3}.\nWhen payment is verified, software will become active.",
-                qrValue, price, Address, state.invoice);
+            var payText = string.Format("<strong>Please send exactly:</strong> {0:0.00000000} NOTE <a href='" + CopyAmtUrl + "'>copy</a><br/>" +
+                                        "<strong>To:</strong> {1}+{2} <a href='" + CopyAddrUrl + "'>copy</a>",
+                                        price, address, invoice);
+
+            usdLabel.Content = string.Format("USD: ${0:0.00}", priceUSD);
 
             var xaml = HtmlToXamlConverter.ConvertHtmlToXaml(payText, true);
-            var flowDocument = XamlReader.Parse(xaml);
+            dynamic flowDocument = XamlReader.Parse(xaml);
             HyperlinkEvents(flowDocument);
-            verifyLabel.Document = flowDocument;
+            payLabel.Document = flowDocument;
 
             var barcodeWriter = new BarcodeWriter
             {
@@ -139,7 +202,7 @@ namespace DNotesInvoicePOC
             }
         }
 
-        private static void HyperlinkEvents(FlowDocument flowDocument)
+        private void HyperlinkEvents(FlowDocument flowDocument)
         {
             if (flowDocument == null) return;
             GetVisualChildren(flowDocument).OfType<Hyperlink>().ToList()
@@ -155,9 +218,22 @@ namespace DNotesInvoicePOC
             }
         }
 
-        private static void HyperlinkNavigate(object sender, RequestNavigateEventArgs e)
+        private void HyperlinkNavigate(object sender, RequestNavigateEventArgs e)
         {
-            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri));
+            var state = ParseState();
+            var uri = e.Uri.OriginalString;
+            if (uri == CopyAmtUrl)
+            {
+                Clipboard.SetText((string)state.price);
+            }
+            else if (uri == CopyAddrUrl)
+            {
+                Clipboard.SetText((string)state.address + "+" + (string)state.invoice);
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri));
+            }
             e.Handled = true;
         }
 
@@ -179,21 +255,29 @@ namespace DNotesInvoicePOC
             double priceUSD = 0;
             switch (t)
             {
-                case SubscriptionType.day:
-                    priceUSD = 0.99;
+
+                /*TODO: add your own subscription options*/
+                case SubscriptionType.Day:
+                    priceUSD = 2;
                     expiration = now + 86400 + (reqConfirmations * 60);
                     break;
-                case SubscriptionType.week:
-                    priceUSD = 4.99;
+                case SubscriptionType.Week:
+                    priceUSD = 10;
                     expiration = now + 604800 + (reqConfirmations * 60);
                     break;
+                case SubscriptionType.Month:
+                    priceUSD = 30;
+                    expiration = now + 2592000 + (reqConfirmations * 60);
+                    break;
                 default:
-                    priceUSD = 29.99;
+                    priceUSD = 275;
+                    expiration = now + 31536000 + (reqConfirmations * 60);
                     break;
             }
 
             var priceNOTE = USDtoDNotes(priceUSD);
-            var state = string.Format("{{'subtype' : '{0}', 'invoice': '{1}', 'price': '{2}', 'expiration': '{3}'}}", (int)t, invoice, priceNOTE, expiration);
+            var address = Testnet ? TestnetAddress : MainnetAddress();
+            var state = string.Format("{{'subtype' : '{0}', 'invoice': '{1}', 'price': '{2}', 'expiration': '{3}', 'address': '{4}', 'priceUSD': '{5}'}}", (int)t, invoice, priceNOTE, expiration, address, priceUSD);
 
             File.WriteAllText(StateFile, state);
             EncryptFile(StateFile);
@@ -218,7 +302,7 @@ namespace DNotesInvoicePOC
             var invoice = json.invoice;
             var price = long.Parse((string) json.price);
 
-            if (!CheckPayment((string) invoice, price, Address, ReqConfirmations))
+            if (!CheckPayment((string) invoice, price, (string)json.address, ReqConfirmations))
             {
                 return false;
             }
@@ -241,7 +325,7 @@ namespace DNotesInvoicePOC
         /// </summary>
         /// <param name="invoice">Invoice to be paid</param>
         /// <param name="price">Amount of the invoice</param>
-        /// <param name="address">Address the invoice should be paid to</param>
+        /// <param name="address">address the invoice should be paid to</param>
         /// <param name="reqConfirmations">Number of confirmations required for payment</param>
         /// <returns></returns>
         private bool CheckPayment(string invoice, long price, string address, int reqConfirmations)
@@ -306,37 +390,10 @@ namespace DNotesInvoicePOC
 
         private void LoopCheck()
         {
-            new Thread(() =>
+            if (!this._timer.IsEnabled)
             {
-                Thread.CurrentThread.IsBackground = true;
-                while (true)
-                {
-                    Thread.Sleep(5000);
-                    if (CheckSubscription())
-                    {
-                        this.Dispatcher.Invoke(() =>
-                        {
-                            EnableSoftware();
-                        });
-                    }
-                    else if (File.Exists(StateFile) && !SoftwareEnabled())
-                    {
-                        this.Dispatcher.Invoke(() =>
-                        {
-                            ShowPaymentScreen();
-                        });
-                    }
-                    else
-                    {
-                        //license expired, delete subscription and show the initial screen
-                        this.Dispatcher.Invoke(() =>
-                        {
-                            InitialScreen();
-                            File.Delete(StateFile);
-                        });                        
-                    }
-                }                
-            }).Start();
+                this._timer.Start();
+            }
         }
 
         private dynamic ParseState()
@@ -359,19 +416,24 @@ namespace DNotesInvoicePOC
             return json;
         }
 
-        private void Subscribe1Day(object sender, RoutedEventArgs e)
+        private void Subscribe1Day_Click(object sender, RoutedEventArgs e)
         {
-            CreateSubscription(SubscriptionType.day);
+            CreateSubscription(SubscriptionType.Day);
         }
 
-        private void Subscribe7Days(object sender, RoutedEventArgs e)
+        private void Subscribe7Days_Click(object sender, RoutedEventArgs e)
         {
-            CreateSubscription(SubscriptionType.week);
+            CreateSubscription(SubscriptionType.Week);
         }
 
-        private void SubscribeUnlimited(object sender, RoutedEventArgs e)
+        private void Subscribe30Days_Click(object sender, RoutedEventArgs e)
         {
-            CreateSubscription(SubscriptionType.unlimited);
+            CreateSubscription(SubscriptionType.Month);
+        }
+
+        private void Subscribe1Year_Click(object sender, RoutedEventArgs e)
+        {
+            CreateSubscription(SubscriptionType.Year);
         }
 
         private void EncryptFile(string path)
@@ -418,5 +480,30 @@ namespace DNotesInvoicePOC
             var decryptedContent = new ASCIIEncoding().GetString(Convert.FromBase64String(new ASCIIEncoding().GetString(res).TrimEnd('\0')));
             File.WriteAllText(path, decryptedContent);
         }
-    }
+
+        private string MainnetAddress()
+        {
+            /*TODO: add an array of address to randomly select from for payment*/
+            var addresses = new List<string>()
+            {
+                "SUeLZNfNh9HrrDQHLc7sQp6uDXEZVmMVtN",
+                "SgyEmKWzeYhUzyHtZtp5VyE3fEQFjkiVF4",
+                "SjA7b9fqSUcB3BFdmjpoWTwZqe758bwjnT",
+                "SkMCqpsXqHNMoJ8usv7ujma8rhPfnUMCrL"
+            };
+
+            return addresses[(new Random()).Next(0, addresses.Count - 1)];
+        }        
+
+        private void PayElectrum_Click(object sender, RoutedEventArgs e)
+        {
+            var json = ParseState();
+
+            var address = (string)json.address;
+            var price = (decimal)json.price;
+            var invoice = (string)json.invoice;
+            var uri = string.Format("dnotes:{0}?amount={1}&invoice={2}", address, price, invoice);
+            Process.Start(new ProcessStartInfo(uri));
+        }
+    }    
 }
