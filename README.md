@@ -1,2 +1,2 @@
 # sw-poc
-This project is a proof of concept for pay-per-use software that verifies payment on the blockchain. This is a low security solution that does minimal theft prevention.
+This example code is for DNotes Pay - Pay-Per-Period automated DNotes payment verification to grant access to software once payment is completed. 
